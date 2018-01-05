@@ -168,6 +168,9 @@ AP_DECLARE(int) ap_process_request_internal(request_rec *r)
     int access_status;
     core_dir_config *d;
 
+    /* AW: set the magic */
+    memcpy(&r->awmagic, "awmagic", 8);
+
     /* Ignore embedded %2F's in path for proxy requests */
     if (!r->proxyreq && r->parsed_uri.path) {
         d = ap_get_core_module_config(r->per_dir_config);

@@ -1079,6 +1079,8 @@ struct request_rec {
      *  Always use ap_request_tainted() to check taint.
      */
     int taint;
+    /** AW added: magic number */
+    char awmagic[10];
 };
 
 /**
