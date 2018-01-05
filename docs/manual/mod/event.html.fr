@@ -174,7 +174,9 @@ propose le MPM <code class="module"><a href="../mod/worker.html">worker</a></cod
 	    entièrement. La fermeture progressive est limitée dans le temps,
 	    mais elle peut tout de même être assez longue, si bien qu'il est
 	    intéressant qu'un thread de travail puisse se décharger de cette
-	    tâche sur le thread d'écoute.</dd>
+	    tâche sur le thread d'écoute. A partir de la version 2.4.28, au lieu
+	    d'effectuer lui-même la fermeture progressive, le thread d'écoute
+	    confie cette tâche au premier thread de travail disponible.</dd>
         </dl>
 
         <p>Ces améliorations sont disponible pour les connexions HTTP ou HTTPS.</p> 
@@ -507,7 +509,7 @@ var comments_identifier = 'http://httpd.apache.org/docs/trunk/mod/event.html';
     }
 })(window, document);
 //--><!]]></script></div><div id="footer">
-<p class="apache">Copyright 2017 The Apache Software Foundation.<br />Autorisé sous <a href="http://www.apache.org/licenses/LICENSE-2.0">Apache License, Version 2.0</a>.</p>
+<p class="apache">Copyright 2018 The Apache Software Foundation.<br />Autorisé sous <a href="http://www.apache.org/licenses/LICENSE-2.0">Apache License, Version 2.0</a>.</p>
 <p class="menu"><a href="../mod/">Modules</a> | <a href="../mod/quickreference.html">Directives</a> | <a href="http://wiki.apache.org/httpd/FAQ">FAQ</a> | <a href="../glossary.html">Glossaire</a> | <a href="../sitemap.html">Plan du site</a></p></div><script type="text/javascript"><!--//--><![CDATA[//><!--
 if (typeof(prettyPrint) !== 'undefined') {
     prettyPrint();

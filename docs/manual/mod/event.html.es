@@ -30,6 +30,10 @@
 <a href="../es/mod/event.html" title="Español">&nbsp;es&nbsp;</a> |
 <a href="../fr/mod/event.html" hreflang="fr" rel="alternate" title="Français">&nbsp;fr&nbsp;</a></p>
 </div>
+<div class="outofdate">Esta traducción podría estar
+            obsoleta. Consulte la versión en inglés de la
+            documentación para comprobar si se han producido cambios
+            recientemente.</div>
 <table class="module"><tr><th><a href="module-dict.html#Description">Descripción:</a></th><td>Una variante del MPM <code class="module"><a href="../mod/worker.html">worker</a></code> con el 
 objetivo de consumir hilos sólo para conexiones con procesamiento 
 activo</td></tr>
@@ -327,7 +331,7 @@ var comments_identifier = 'http://httpd.apache.org/docs/trunk/mod/event.html';
     }
 })(window, document);
 //--><!]]></script></div><div id="footer">
-<p class="apache">Copyright 2017 The Apache Software Foundation.<br />Licencia bajo los términos de la <a href="http://www.apache.org/licenses/LICENSE-2.0">Apache License, Version 2.0</a>.</p>
+<p class="apache">Copyright 2018 The Apache Software Foundation.<br />Licencia bajo los términos de la <a href="http://www.apache.org/licenses/LICENSE-2.0">Apache License, Version 2.0</a>.</p>
 <p class="menu"><a href="../mod/">Módulos</a> | <a href="../mod/quickreference.html">Directivas</a> | <a href="http://wiki.apache.org/httpd/FAQ">Preguntas Frecuentes</a> | <a href="../glossary.html">Glosario</a> | <a href="../sitemap.html">Mapa del sitio web</a></p></div><script type="text/javascript"><!--//--><![CDATA[//><!--
 if (typeof(prettyPrint) !== 'undefined') {
     prettyPrint();

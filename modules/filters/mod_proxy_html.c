@@ -109,6 +109,9 @@ typedef struct {
     const char *encoding;
     urlmap *map;
     const char *etag;
+    char rbuf[4];
+    apr_size_t rlen;
+    apr_size_t rmin;
 } saxctxt;
 
 
@@ -666,7 +669,7 @@ static void pstartElement(void *ctxt, const xmlChar *uname,
     }
 }
 
-static meta *metafix(request_rec *r, const char *buf)
+static meta *metafix(request_rec *r, const char *buf, apr_size_t len)
 {
     meta *ret = NULL;
     size_t offs = 0;
@@ -677,7 +680,8 @@ static meta *metafix(request_rec *r, const char *buf)
     ap_regmatch_t pmatch[2];
     char delim;
 
-    while (!ap_regexec(seek_meta, buf+offs, 2, pmatch, 0)) {
+    while (offs < len &&
+           !ap_regexec_len(seek_meta, buf + offs, len - offs, 2, pmatch, 0)) {
         header = NULL;
         content = NULL;
         p = buf+offs+pmatch[1].rm_eo;
@@ -850,7 +854,6 @@ static saxctxt *check_filter_init (ap_filter_t *f)
 #ifndef GO_FASTER
             ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, f->r, "%s", errmsg);
 #endif
-            ap_remove_output_filter(f);
             return NULL;
         }
 
@@ -873,39 +876,55 @@ static saxctxt *check_filter_init (ap_filter_t *f)
     return f->ctx;
 }
 
+static void prepend_rbuf(saxctxt *ctxt, apr_bucket_brigade *bb)
+{
+    if (ctxt->rlen) {
+        apr_bucket *b = apr_bucket_transient_create(ctxt->rbuf,
+                                                    ctxt->rlen,
+                                                    bb->bucket_alloc);
+        APR_BRIGADE_INSERT_HEAD(bb, b);
+        ctxt->rlen = 0;
+    }
+}
+
 static apr_status_t proxy_html_filter(ap_filter_t *f, apr_bucket_brigade *bb)
 {
-    apr_bucket* b;
-    meta *m = NULL;
     xmlCharEncoding enc;
-    const char *buf = 0;
-    apr_size_t bytes = 0;
+    const char *buf;
+    apr_size_t bytes;
 #ifndef USE_OLD_LIBXML2
     int xmlopts = XML_PARSE_RECOVER | XML_PARSE_NONET |
                   XML_PARSE_NOBLANKS | XML_PARSE_NOERROR | XML_PARSE_NOWARNING;
 #endif
 
     saxctxt *ctxt = check_filter_init(f);
-    if (!ctxt)
+    if (!ctxt) {
+        ap_remove_output_filter(f);
         return ap_pass_brigade(f->next, bb);
-    for (b = APR_BRIGADE_FIRST(bb);
-         b != APR_BRIGADE_SENTINEL(bb);
-         b = APR_BUCKET_NEXT(b)) {
+    }
+
+    while (!APR_BRIGADE_EMPTY(bb)) {
+        apr_bucket *b = APR_BRIGADE_FIRST(bb);
+
         if (APR_BUCKET_IS_METADATA(b)) {
             if (APR_BUCKET_IS_EOS(b)) {
                 if (ctxt->parser != NULL) {
-                    consume_buffer(ctxt, buf, 0, 1);
+                    consume_buffer(ctxt, "", 0, 1);
+                    APR_BRIGADE_PREPEND(bb, ctxt->bb);
                 }
-                APR_BRIGADE_INSERT_TAIL(ctxt->bb,
-                apr_bucket_eos_create(ctxt->bb->bucket_alloc));
-                ap_pass_brigade(ctxt->f->next, ctxt->bb);
+                else {
+                    prepend_rbuf(ctxt, bb);
+                }
+                ap_remove_output_filter(f);
+                return ap_pass_brigade(f->next, bb);
             }
             else if (APR_BUCKET_IS_FLUSH(b)) {
                 /* pass on flush, except at start where it would cause
                  * headers to be sent before doc sniffing
                  */
                 if (ctxt->parser != NULL) {
-                    ap_fflush(ctxt->f->next, ctxt->bb);
+                    ap_fflush(f->next, ctxt->bb);
+                    apr_brigade_cleanup(ctxt->bb);
                 }
             }
         }
@@ -918,9 +937,19 @@ static apr_status_t proxy_html_filter(ap_filter_t *f, apr_bucket_brigade *bb)
                  * HTML rewriting. The URL schema (i.e. 'http') needs four bytes alone.
                  * And the HTML parser needs at least four bytes to initialise correctly.
                  */
-                if ((bytes < 4) && APR_BUCKET_IS_EOS(APR_BUCKET_NEXT(b))) {
-                    ap_remove_output_filter(f);
-                    return ap_pass_brigade(f->next, bb);
+                ctxt->rmin += bytes;
+                if (ctxt->rmin < sizeof(ctxt->rbuf)) {
+                    memcpy(ctxt->rbuf + ctxt->rlen, buf, bytes);
+                    ctxt->rlen += bytes;
+                    apr_bucket_delete(b);
+                    continue;
+                }
+                if (ctxt->rlen && ctxt->rlen < sizeof(ctxt->rbuf)) {
+                    apr_size_t rem = sizeof(ctxt->rbuf) - ctxt->rlen;
+                    memcpy(ctxt->rbuf + ctxt->rlen, buf, rem);
+                    ctxt->rlen += rem;
+                    buf += rem;
+                    bytes -= rem;
                 }
 
                 if (!xml2enc_charset ||
@@ -949,15 +978,25 @@ static apr_status_t proxy_html_filter(ap_filter_t *f, apr_bucket_brigade *bb)
                 }
 
                 ap_fputs(f->next, ctxt->bb, ctxt->cfg->doctype);
-                ctxt->parser = htmlCreatePushParserCtxt(&sax, ctxt, buf,
-                                                        4, 0, enc);
-                buf += 4;
-                bytes -= 4;
-                if (ctxt->parser == NULL) {
-                    apr_status_t rv = ap_pass_brigade(f->next, bb);
-                    ap_remove_output_filter(f);
-                    return rv;
+
+                if (ctxt->rlen) {
+                    ctxt->parser = htmlCreatePushParserCtxt(&sax, ctxt,
+                                                            ctxt->rbuf,
+                                                            ctxt->rlen,
+                                                            NULL, enc);
                 }
+                else {
+                    ctxt->parser = htmlCreatePushParserCtxt(&sax, ctxt, buf, 4,
+                                                            NULL, enc);
+                    buf += 4;
+                    bytes -= 4;
+                }
+                if (ctxt->parser == NULL) {
+                    prepend_rbuf(ctxt, bb);
+                    ap_remove_output_filter(f);
+                    return ap_pass_brigade(f->next, bb);
+                }
+                ctxt->rlen = 0;
                 apr_pool_cleanup_register(f->r->pool, ctxt->parser,
                                           (int(*)(void*))htmlFreeParserCtxt,
                                           apr_pool_cleanup_null);
@@ -966,27 +1005,28 @@ static apr_status_t proxy_html_filter(ap_filter_t *f, apr_bucket_brigade *bb)
                     ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, f->r, APLOGNO(01423)
                                   "Unsupported parser opts %x", xmlopts);
 #endif
-                if (ctxt->cfg->metafix)
-                    m = metafix(f->r, buf);
-                if (m) {
-                    consume_buffer(ctxt, buf, m->start, 0);
-                    consume_buffer(ctxt, buf+m->end, bytes-m->end, 0);
-                }
-                else {
-                    consume_buffer(ctxt, buf, bytes, 0);
+                if (ctxt->cfg->metafix) {
+                    meta *m = metafix(f->r, buf, bytes);
+                    if (m) {
+                        consume_buffer(ctxt, buf, m->start, 0);
+                        buf += m->end;
+                        bytes -= m->end;
+                    }
                 }
             }
-            else {
-                consume_buffer(ctxt, buf, bytes, 0);
-            }
+            consume_buffer(ctxt, buf, bytes, 0);
         }
         else {
             ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, f->r, APLOGNO(01424)
                           "Error in bucket read");
         }
+
+        apr_bucket_delete(b);
     }
-    /*ap_fflush(ctxt->f->next, ctxt->bb);        // uncomment for debug */
-    apr_brigade_cleanup(bb);
+#if 0  /* uncomment for debug */
+    ap_fflush(f->next, ctxt->bb);
+    apr_brigade_cleanup(ctxt->bb);
+#endif
     return APR_SUCCESS;
 }
 
